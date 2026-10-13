@@ -1,0 +1,83 @@
+name: Something did not work
+description: A run that crashed, produced nothing, or produced the wrong thing
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. This pipeline runs on machines we have no access to, and
+        HPC environments differ in ways we cannot predict from here, so a report about a
+        system we have never seen is genuinely useful.
+
+        [docs/reporting-problems.md](https://github.com/TravisWheelerLab/blimmp-nf/blob/main/docs/reporting-problems.md)
+        explains where each of these lives, and has a command that collects the version block
+        for you.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what you got instead.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: test-profile
+    attributes:
+      label: Does the bundled test pass?
+      description: |
+        `nextflow run main.nf -profile test,docker` then `assets/test/assert.sh results_test`
+        (swap `docker` for `singularity` on a cluster). About 30 seconds. This one answer
+        separates a broken environment from a problem with your data, so it saves a round trip.
+      options:
+        - "Yes, the bundled test passes"
+        - "No, the bundled test fails too"
+        - "It will not start at all"
+        - "Have not tried it"
+    validations:
+      required: true
+
+  - type: textarea
+    id: command
+    attributes:
+      label: The command you ran
+      description: All of it, including -profile and any -c file. Paste the site config too, if you wrote one.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: error
+    attributes:
+      label: What Nextflow printed
+      description: The whole block starting at "Error executing process", which names the work directory.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: command-err
+    attributes:
+      label: .command.err and .command.sh from that work directory
+      description: The tool's own error message, and the command that actually ran.
+      render: text
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: |
+        Output of the version block in docs/reporting-problems.md: Nextflow, Java, container
+        engine, OS, scheduler.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: anything-else
+    attributes:
+      label: Anything else
+      description: |
+        Attach `.nextflow.log` as a file if you can. For results that look wrong rather than
+        broken, add `<outdir>/<sample>/<sample>_debug.log`, which records the completeness and
+        the taxonomic priors the run used.

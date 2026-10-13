@@ -1,0 +1,17 @@
+# Nextflow runtime
+work/
+.nextflow/
+.nextflow.log*
+
+# Job logs
+nextflow-*.out
+nextflow-*.err
+nf-*.out
+nf-*.err
+
+# Results (data, not code)
+results/
+results_test/
+
+# Claude Code
+.claude/

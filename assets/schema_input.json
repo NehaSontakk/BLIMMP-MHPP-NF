@@ -1,0 +1,43 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema",
+    "$id": "https://raw.githubusercontent.com/TravisWheelerLab/blimmp-nf/main/assets/schema_input.json",
+    "title": "blimmp-nf samplesheet",
+    "description": "The columns of the file given to --input. One row is one sample.",
+    "type": "array",
+    "items": {
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                "pattern": "^\\S+$",
+                "errorMessage": "A name is required on every row, and cannot contain spaces.",
+                "meta": ["id"],
+                "description": "The sample ID. Names the output subdirectory and prefixes every file in it, so no two rows may share one."
+            },
+            "genome_files": {
+                "type": "string",
+                "errorMessage": "genome_files must be a path or a glob, never a bare directory.",
+                "description": "Nucleotide FASTA, gene-called with pyrodigal. One path or a glob; several matches are joined into one sequence and gene-called once. Give this or protein_files, not both."
+            },
+            "protein_files": {
+                "type": "string",
+                "errorMessage": "protein_files must be a path or a glob, never a bare directory.",
+                "description": "Protein FASTA, skipping pyrodigal. One path or a glob; several matches are joined into one proteome. Give this or genome_files, not both."
+            },
+            "sigma": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "exclusiveMinimum": true,
+                "errorMessage": "sigma is a fraction greater than 0 and no greater than 1, so 85% complete is 0.85.",
+                "description": "This sample's completeness fraction. Leave blank to fall back to --sigma, or to BUSCO's measurement when --busco_lineage is given. A row with no sigma from any source is annotated and skips BLIMMP."
+            },
+            "taxonomy": {
+                "type": "string",
+                "errorMessage": "taxonomy must be a name BLIMMP ships priors for; BLIMMP lists the valid ones.",
+                "description": "Which taxonomic priors to score this sample against. Leave blank to fall back to --taxonomy, or to all-bacteria priors."
+            }
+        },
+        "required": ["name"]
+    }
+}

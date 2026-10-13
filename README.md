@@ -1,0 +1,198 @@
+# BLIMMP-MHPP-NF
+
+A Nextflow pipeline for identifying KEGG metabolic modules in bacterial genomes with
+**BLIMMP_MHPP** — the MHPP001 (`K99001`/`pme`) module addition to
+[BLIMMP](https://github.com/TravisWheelerLab/BLIMMP) (Bayesian Likelihood Inference of Metabolic
+Module Presence), maintained at
+[NehaSontakk/BLIMMP_MHPP](https://github.com/NehaSontakk/BLIMMP_MHPP).
+
+This is a fork of [TravisWheelerLab/blimmp-nf](https://github.com/TravisWheelerLab/blimmp-nf)
+(BSD-3-Clause, © 2026 Travis Wheeler — see [LICENSE](LICENSE)), rewired to run the MHPP fork of
+BLIMMP instead of upstream. Everything about the Nextflow workflow itself — gene calling,
+masking, HMMER search, chunk sizing, BUSCO completeness — is unchanged from upstream; only the
+`RUN_BLIMMP` step and its container differ. See
+[docs/developer.md § The BLIMMP container](docs/developer.md#the-blimmp-container) for exactly
+what's different and why.
+
+Give it genome assemblies. It calls genes with pyrodigal, masks low-complexity regions in the
+predicted proteins with tantan, searches them against the KOfam HMM database (plus `K99001` for
+the MHPP module), optionally measures genome completeness with BUSCO, and runs BLIMMP_MHPP to
+infer the probability that each KEGG module — including MHPP001 — is present, accounting for
+what a draft assembly is missing.
+
+## Before anything else: this needs a container you have to build yourself
+
+Unlike upstream BLIMMP, `BLIMMP_MHPP` has no published container image yet. **`docker` and
+`singularity` profiles will not work until you build and tag the image locally** (or push it
+somewhere and point `main.nf` at that instead). `BLIMMP_MHPP` is also a **private** repository,
+so you need both GitHub access to it and a personal access token to build its container (one of
+its data directories ships as a private Release asset).
+
+```bash
+# 1. Clone the BLIMMP_MHPP source (you need collaborator access to this repo).
+git clone https://github.com/NehaSontakk/BLIMMP_MHPP.git
+cd BLIMMP_MHPP
+
+# 2. Build the image. The cooccurrence lookup data is a private Release asset,
+#    so the build needs a GitHub token with access to this repo, passed as a
+#    BuildKit secret — never as a plain ARG/ENV, so it never lands in an image layer.
+export GH_TOKEN=$(gh auth token)   # or any PAT with read access to this repo
+DOCKER_BUILDKIT=1 docker build --secret id=gh_token,env=GH_TOKEN \
+    -t ghcr.io/nehasontakk/blimmp_mhpp:26sep2026-mhpp1 .
+unset GH_TOKEN
+```
+
+The tag `ghcr.io/nehasontakk/blimmp_mhpp:26sep2026-mhpp1` has to match exactly what's named in
+the `container` directive of the `RUN_BLIMMP` process in [`main.nf`](main.nf) — Docker/Singularity
+will happily use a matching local image without ever reaching the registry, so nothing here
+requires `docker push` to actually run the pipeline. If you change the tag in one place, change it
+in the other.
+
+Building takes a few minutes; the cooccurrence asset alone is about 1 GB.
+
+## Check that it works, in about 30 seconds
+
+Once the container is built:
+
+```bash
+nextflow run main.nf -profile test,docker
+assets/test/assert.sh results_test
+```
+
+Bundled data: two 150 kb slices of real *Prochlorococcus* genomes against 20 KOfam profiles.
+`assert.sh` then checks that the run found the KOs it should have, because a pipeline can exit 0
+having produced nothing at all. Swap `docker` for `singularity` on a cluster.
+
+## Quick start
+
+```bash
+git clone https://github.com/NehaSontakk/BLIMMP-MHPP-NF.git
+cd BLIMMP-MHPP-NF
+```
+
+Pick a profile: where the work runs, then where the tools come from. Nothing to copy or edit.
+
+| your machine | `-profile` |
+|---|---|
+| Laptop or workstation | `laptop,docker` |
+| Large shared server | `server,docker` |
+| Slurm cluster | `slurm,singularity`, plus a [small site config](docs/configuration.md#another-slurm-cluster) naming your account and partition |
+| University of Arizona HPC | `uahpc,singularity` |
+| TACC Stampede3 | `singularity` with [`conf/stampede3.config`](conf/stampede3.config), and no `slurm`: jobs get whole nodes, so Nextflow schedules inside one allocation |
+| Tools already on `PATH` | just `laptop` |
+
+```bash
+nextflow run main.nf \
+    --genomes /path/to/genomes/ \
+    --hmms /path/to/kofam/ \
+    --busco_lineage bacteria_odb12 \
+    -profile laptop,docker
+```
+
+`--genomes` takes a directory of `.fna`/`.fa`/`.fasta` files or a glob (point it at one file, or
+a directory with exactly one, to run a single genome); `--proteins` takes protein FASTAs instead
+and skips gene calling. `--hmms` takes one concatenated `.hmm` file or a directory of them.
+`--busco_lineage` measures how complete each genome is, which is what lets BLIMMP tell an absent
+pathway from an unsequenced one; `--busco_lineage auto_prok` lets BUSCO choose the lineage for
+each genome, and `--sigma 1.0` states the fraction yourself instead (use this for closed,
+single-contig assemblies — there's nothing for BUSCO to measure).
+
+Results land in `results/`, one subdirectory per genome, holding the HMMER tables and
+BLIMMP_MHPP's per-module probabilities (`*_BLIMMP_substituted_*` files — see
+[docs/running.md](docs/running.md) for the full output layout). `nextflow run main.nf --help`
+lists every parameter.
+
+### Testing the MHPP module specifically
+
+The MHPP001 module needs its marker KO, `K99001` (placeholder for the `pme` enzyme), which is
+**not yet packaged anywhere versioned** — you have to supply `K99001.hmm` yourself and drop it
+into whatever `--hmms` directory you point at, alongside the regular KOfam profiles:
+
+```bash
+./fetch_reference_data.sh --kofam /path/to/kofam/   # full KOfam, ~7.2 GB extracted
+cp /path/to/K99001.hmm /path/to/kofam/
+
+nextflow run main.nf \
+    --genomes /path/to/genome.fna \
+    --hmms /path/to/kofam/ \
+    --sigma 1.0 \
+    -profile laptop,docker
+```
+
+Then check the module's confidence:
+
+```bash
+grep MHPP001 results/<sample>/<sample>_BLIMMP_substituted_module_probabilities.csv
+```
+
+**Plain Docker needs an extra bind mount for a directory-mode `--hmms`.** `GROUP_HMMS` receives a
+directory path as a raw string rather than as a staged Nextflow `path` input (staging ~28k
+individual symlinks isn't practical), so Docker never automatically sees it — unlike single
+staged files, which Nextflow auto-binds by resolving their symlink targets. Singularity's
+`autoMounts` doesn't cover this either (see the "needs a bind of your own" note in
+[docs/hpc.md § BUSCO lineages, and why to download one first](docs/hpc.md#busco-lineages-and-why-to-download-one-first),
+which covers the same gap for `--busco_downloads`). On plain Docker Desktop, add a one-off config:
+
+```groovy
+// local_mount.config
+docker {
+    runOptions = '-u $(id -u):$(id -g) -v /path/to/kofam:/path/to/kofam'
+}
+```
+
+```bash
+nextflow run main.nf ... -profile laptop,docker -c local_mount.config
+```
+
+## Documentation
+
+- [What the pipeline does](docs/overview.md): the steps, completeness, taxonomic priors, and re-scoring without re-searching
+- [Configuration](docs/configuration.md): installing Nextflow, and the profile for your machine
+- [Running the workflow](docs/running.md): inputs, output layout, resuming, dry runs
+- [Running at scale](docs/hpc.md): submitting to a scheduler, chunk size, concurrency, cleanup
+- [Parameters](docs/parameters.md): every flag, generated from the schema
+- [Samplesheets](docs/samplesheets.md): a completeness and taxonomy per genome, with ten worked examples
+- [When something goes wrong](docs/reporting-problems.md): diagnosing a failure, and what to include in a report
+- [Porting to a new cluster](docs/porting.md): reconnaissance, a test ladder, and how to send the fixes back
+- [Developer guide](docs/developer.md): architecture, channel patterns, adding a step, **and how the BLIMMP_MHPP container is built and released**
+
+## Requirements
+
+- [Nextflow](https://www.nextflow.io/) 22.10 or later. Nextflow 24.11 and later need Java 17;
+  earlier releases run on Java 11. The Nextflow installer does not install Java, which is the
+  step that catches people out. See [getting Nextflow](docs/configuration.md#getting-nextflow).
+  (`brew install nextflow` on macOS pulls in a working Java automatically.)
+- [Docker](https://www.docker.com/), or [Singularity/Apptainer](https://apptainer.org/) on HPC.
+  HMMER, pyrodigal, tantan and BUSCO all run in public containers. **BLIMMP_MHPP does not** — see
+  [above](#before-anything-else-this-needs-a-container-you-have-to-build-yourself). Without a
+  container profile you'd need HMMER 3.x, pyrodigal 3.x, tantan, BUSCO 6.x and BLIMMP_MHPP
+  installed yourself; BUSCO and BLIMMP_MHPP have no supported non-container path here.
+- **Collaborator access to [NehaSontakk/BLIMMP_MHPP](https://github.com/NehaSontakk/BLIMMP_MHPP)**
+  (private repo) and a GitHub token with read access to it, to build the container.
+  [`gh`](https://cli.github.com/) (`gh auth login`) is the easiest way to get one
+  (`gh auth token`).
+- The KOfam HMM profiles, 27,816 of them (release `2026-07-02`), about 7.2 GB extracted.
+  `./fetch_reference_data.sh --kofam /path/to/kofam` downloads and unpacks them from
+  [GenomeNet](https://www.genome.jp/ftp/db/kofam/). The same script fetches example genomes and a
+  BUSCO lineage; `--help` lists what it does.
+- `K99001.hmm`, to detect the MHPP001 module specifically — see
+  [Testing the MHPP module specifically](#testing-the-mhpp-module-specifically) above. Not
+  bundled anywhere yet; you'll need a copy from wherever BLIMMP_MHPP work currently keeps it.
+
+## If it does not work on your system
+
+Nextflow's reach is the reason this pipeline exists in this form: the same workflow runs on a
+laptop, a Slurm cluster, or AWS Batch. That same reach is what makes it hard to test. Upstream has
+covered the combinations it can get at, and HPC environments differ in ways that can't be
+predicted from here. How memory must be requested, whether compute nodes can reach the network,
+which module names exist, how Singularity was built: all of it varies.
+
+If something does not work, open an issue on this repo with the details of your system and the
+error; [when something goes wrong](docs/reporting-problems.md) lists what to include and gives
+you a command that collects most of it.
+
+## License
+
+See [LICENSE](LICENSE) — BSD-3-Clause, © 2026 Travis Wheeler, carried over unmodified from
+upstream `blimmp-nf`. The BLIMMP_MHPP source this pipeline runs is separately licensed in its own
+repository.

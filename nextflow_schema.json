@@ -1,0 +1,266 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema",
+    "$id": "https://raw.githubusercontent.com/TravisWheelerLab/blimmp-nf/main/nextflow_schema.json",
+    "title": "blimmp-nf pipeline parameters",
+    "description": "Identify KEGG metabolic modules in bacterial genomes with BLIMMP: pyrodigal gene calling, a parallel HMMER search against KOfam, optional BUSCO completeness, then BLIMMP module inference.",
+    "type": "object",
+    "definitions": {
+        "input": {
+            "title": "Input",
+            "type": "object",
+            "fa_icon": "fas fa-file-import",
+            "description": "Where the sequences come from. Give exactly one of --input, --genomes or --proteins.",
+            "properties": {
+                "input": {
+                    "type": "string",
+                    "format": "file-path",
+                    "mimetype": "text/csv",
+                    "pattern": "^\\S+\\.(csv|tsv)$",
+                    "schema": "assets/schema_input.json",
+                    "fa_icon": "fas fa-table",
+                    "description": "Samplesheet, one row per sample, carrying its own completeness and taxonomy.",
+                    "help_text": "A CSV or TSV with a header. Columns are 'name', one of 'genome_files' or 'protein_files', and the optional 'sigma' and 'taxonomy'. Blank sigma and taxonomy cells fall back to --sigma and --taxonomy. A cell holds one path or a glob, never a bare directory, and a row naming several files is one sample assembled from pieces. Relative paths are read from the samplesheet's own directory. Ten worked examples are in docs/samplesheets.md."
+                },
+                "genomes": {
+                    "type": "string",
+                    "format": "path",
+                    "fa_icon": "fas fa-dna",
+                    "description": "Directory of nucleotide FASTA files (.fa, .fna, .fasta), or a glob pattern. Genes are called with pyrodigal.",
+                    "help_text": "One genome per subdirectory by default, so genomes/MED4/*.fna gives the sample ID MED4. A flat directory would give every genome the same ID and stops the run; add --id_from_filename to name them after the files instead."
+                },
+                "proteins": {
+                    "type": "string",
+                    "format": "path",
+                    "fa_icon": "fas fa-bacteria",
+                    "description": "Directory of protein FASTA files (.fa, .faa, .fasta), or a glob pattern. Skips pyrodigal.",
+                    "help_text": "BUSCO cannot measure completeness from protein sequences, so --sigma is the only way a protein run reaches BLIMMP. Without it the run annotates against KOfam and stops there."
+                },
+                "hmms": {
+                    "type": "string",
+                    "format": "path",
+                    "fa_icon": "fas fa-layer-group",
+                    "description": "A single concatenated .hmm file such as KOfam profiles.hmm, or a directory of individual .hmm files.",
+                    "help_text": "Required for every run except -entry blimmp_only, which starts from finished HMMER tables."
+                },
+                "id_from_filename": {
+                    "type": "boolean",
+                    "default": false,
+                    "fa_icon": "fas fa-tag",
+                    "description": "Take sample IDs from file names rather than parent directory names.",
+                    "help_text": "Use this when all inputs sit in one flat directory and would otherwise share an ID. Directory names usually carry strain labels; file names usually carry accessions. Ignored with --input, where the 'name' column gives the ID."
+                }
+            }
+        },
+        "output": {
+            "title": "Output",
+            "type": "object",
+            "fa_icon": "fas fa-folder-open",
+            "properties": {
+                "outdir": {
+                    "type": "string",
+                    "format": "directory-path",
+                    "default": "results",
+                    "fa_icon": "fas fa-folder",
+                    "description": "Where final output files are written, one subdirectory per sample.",
+                    "help_text": "Changing this re-runs the BLIMMP tasks, because the debug log is copied out to an absolute path named inside the task script and that path is part of the task hash. The HMMER searches stay cached."
+                },
+                "no_blimmp_log": {
+                    "type": "boolean",
+                    "default": false,
+                    "fa_icon": "fas fa-file-alt",
+                    "description": "Skip the BLIMMP debug log, which is written by default at roughly 3.4 MB per genome.",
+                    "help_text": "The log is the only published record of the completeness value and the taxonomic priors a genome was scored with. When BLIMMP once shipped without its KEGG data files, this log was the only thing that said so. It lands at <outdir>/<name>/<name>_debug.log, and a crash still copies out whatever it contains. BLIMMP_MHPP ties the log to -v/--verbose, which also writes the pass-1 comparison files alongside the substituted ones the pipeline reads, so this flag skips both together."
+                }
+            }
+        },
+        "masking": {
+            "title": "Sequence masking",
+            "type": "object",
+            "fa_icon": "fas fa-mask",
+            "description": "Low-complexity regions score against many profiles for reasons that have nothing to do with homology. tantan masks them by default.",
+            "properties": {
+                "no_masking": {
+                    "type": "boolean",
+                    "default": false,
+                    "fa_icon": "fas fa-mask",
+                    "description": "Skip the tantan masking step, searching the protein sequences exactly as pyrodigal predicted them.",
+                    "help_text": "Masking is on by default and runs `tantan -p -x X`, replacing low-complexity residues with X so HMMER scores them as unknown. Measured across nine Prochlorococcus strains: it removed 209 hits, none of which was above its KOfam threshold, and recovered two enzymes whose alignments a low-complexity stretch had been fragmenting, threonine dehydratase in seven strains and aspartate kinase in four. Setting this changes every HMMSEARCH task hash, so a run made the other way re-searches instead of resuming."
+                }
+            }
+        },
+        "genome_completeness": {
+            "title": "Genome completeness (sigma)",
+            "type": "object",
+            "fa_icon": "fas fa-percent",
+            "description": "BLIMMP weighs a missing KO against how much of the genome is actually there. That fraction is sigma.",
+            "properties": {
+                "busco_lineage": {
+                    "type": "string",
+                    "fa_icon": "fas fa-ruler",
+                    "description": "Measure completeness per genome with BUSCO using this lineage, e.g. bacteria_odb12, or auto, auto_prok or auto_euk to let BUSCO pick one per genome.",
+                    "help_text": "Needs nucleotide sequences. Use it when the missing fraction is real and unknown, meaning drafts and MAGs. The auto values place each genome on BUSCO's reference tree and score it against the deepest dataset that fits, which suits a set of bins from different clades; auto_prok and auto_euk skip the other domain and are faster. BUSCO runs at least twice per genome this way, so expect a few times the run time of a named dataset, and it may score two genomes in one run against different marker sets: busco_summary.tsv records which one measured each row. On an assembly you already consider complete, prefer --sigma 1.0: BUSCO does not return 1.0 for a closed genome, it returns how much of one clade's marker set it found, and that varies with the rank, so auto, which picks the deepest rank, is the wrong tool there. Refused together with --sigma on the command line, since both describe the whole run and nothing says which should win. With --input the two do combine, because a sheet establishes an order: the sigma cell wins, then BUSCO's measurement, then --sigma."
+                },
+                "busco_downloads": {
+                    "type": "string",
+                    "format": "directory-path",
+                    "fa_icon": "fas fa-folder",
+                    "description": "Directory holding already-downloaded BUSCO datasets, which makes the BUSCO step run offline.",
+                    "help_text": "Without it each BUSCO task downloads the lineage itself, once per genome, and a compute node with no outbound network cannot. Populate the directory first on a machine that does have network: busco --download LINEAGE --download_path DIR. For --busco_lineage auto the directory has to hold the placement tree and every dataset BUSCO might choose, which means the whole domain: busco --download prokaryota (or eukaryota, or all) --download_path DIR. The pipeline checks for the tree and the root datasets before starting, because BUSCO reports a missing root dataset as a Python traceback; the dataset the placement picks cannot be checked in advance, and downloading the domain is what guarantees it is there. Give an absolute path, and check it is visible inside the container: singularity.autoMounts covers the usual locations, but an unusual one needs an explicit bind in runOptions."
+                },
+                "sigma": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "exclusiveMinimum": true,
+                    "fa_icon": "fas fa-percentage",
+                    "description": "State the completeness fraction instead of measuring it, e.g. 0.85 for a genome believed 85% complete.",
+                    "help_text": "Applies to every input, and fills in blank sigma cells when you use --input. Give 1.0 for sequences you are reasonably certain are complete, which is the right answer for closed and finished assemblies and avoids the marker-set artifact --busco_lineage introduces there. There is deliberately no default: a default would assert that every input is complete, which is a claim about your data rather than a convenience."
+                }
+            }
+        },
+        "module_detection": {
+            "title": "Module detection",
+            "type": "object",
+            "fa_icon": "fas fa-project-diagram",
+            "properties": {
+                "taxonomy": {
+                    "type": "string",
+                    "fa_icon": "fas fa-sitemap",
+                    "description": "Which set of taxonomic priors BLIMMP scores against, e.g. cyanobacteriota. Defaults to all bacteria.",
+                    "help_text": "BLIMMP ships 20 sets: one domain, four kingdom, fifteen phylum. Applies to every input, and fills in blank taxonomy cells when you use --input. BLIMMP validates the name and lists the valid ones if it does not recognise yours, so an unknown name is caught when the first BLIMMP task runs rather than at startup. The choice changes results, sometimes enough to flip a module call, and a narrower group is not automatically better."
+                }
+            }
+        },
+        "rescoring": {
+            "title": "Re-scoring finished searches",
+            "type": "object",
+            "fa_icon": "fas fa-redo",
+            "description": "Used only with -entry blimmp_only, which starts from HMMER tables that already exist. The search takes hours and BLIMMP takes minutes, so re-scoring should not mean re-searching.",
+            "properties": {
+                "domtblout": {
+                    "type": "string",
+                    "format": "path",
+                    "fa_icon": "fas fa-table",
+                    "description": "Directory of .domtblout files, or a glob such as 'results/*/*.domtblout'.",
+                    "help_text": "Sample IDs come from parent directory names, or from file names with --id_from_filename."
+                },
+                "completeness": {
+                    "type": "string",
+                    "format": "file-path",
+                    "fa_icon": "fas fa-list-ol",
+                    "description": "A busco_summary.tsv from an earlier run, giving each sample the completeness BUSCO measured for it.",
+                    "help_text": "Two columns per line, a sample ID and a fraction. Any row whose second column is not a number is skipped, which covers the header. Give this or --sigma, not both."
+                }
+            }
+        },
+        "parallelism": {
+            "title": "Parallelism",
+            "type": "object",
+            "fa_icon": "fas fa-network-wired",
+            "description": "The HMM database is split into chunks and every genome is searched against every chunk, so these control how many jobs the run creates.",
+            "properties": {
+                "hmm_chunk_size": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "fa_icon": "fas fa-cut",
+                    "description": "Number of HMM profiles per chunk. Turns off the automatic sizing.",
+                    "help_text": "Left unset, the pipeline picks a chunk count from the slots available and the number of samples, and logs what it chose. Set this when you want a fixed size regardless. Smaller chunks mean more jobs that each finish sooner, up to the point where scheduler queueing costs more than the parallelism is worth. Mutually exclusive with --hmm_chunks."
+                },
+                "hmm_chunks": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "fa_icon": "fas fa-th",
+                    "description": "Total number of chunks, with the chunk size worked out to match.",
+                    "help_text": "Mutually exclusive with --hmm_chunk_size."
+                },
+                "max_concurrent": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "fa_icon": "fas fa-tachometer-alt",
+                    "description": "Cap on how many jobs are submitted to the scheduler at once. Defaults to 100, which is Nextflow's own default for grid executors.",
+                    "help_text": "On a shared server the total CPU use is roughly max_concurrent multiplied by the cpus a search asks for, which is two unless you override HMMSEARCH by name."
+                }
+            }
+        },
+        "testing": {
+            "title": "Testing at reduced scale",
+            "type": "object",
+            "fa_icon": "fas fa-vial",
+            "properties": {
+                "subsample_genomes": {
+                    "type": "integer",
+                    "default": 0,
+                    "minimum": 0,
+                    "fa_icon": "fas fa-filter",
+                    "description": "Use only the first N inputs. 0 means all of them.",
+                    "help_text": "Applies to genomes, protein files, or samplesheet rows, whichever the run started from."
+                },
+                "subsample_hmms": {
+                    "type": "integer",
+                    "default": 0,
+                    "minimum": 0,
+                    "fa_icon": "fas fa-filter",
+                    "description": "Use only the first N HMM profiles. 0 means all of them.",
+                    "help_text": "Cuts a full KOfam run down to something that finishes in minutes. The results are not biologically meaningful."
+                }
+            }
+        },
+        "generic": {
+            "title": "Generic options",
+            "type": "object",
+            "fa_icon": "fas fa-question-circle",
+            "properties": {
+                "help": {
+                    "type": "boolean",
+                    "default": false,
+                    "fa_icon": "fas fa-question",
+                    "description": "Print the parameter list and exit.",
+                    "help_text": "Add --help_all for the longer explanation under each parameter."
+                },
+                "help_all": {
+                    "type": "boolean",
+                    "default": false,
+                    "fa_icon": "fas fa-book",
+                    "description": "Print the parameter list with the full explanation of each, and exit.",
+                    "help_text": "Everything --help prints, plus the help text that would otherwise send you to the docs."
+                },
+                "validate_params": {
+                    "type": "boolean",
+                    "default": true,
+                    "fa_icon": "fas fa-check-double",
+                    "description": "Stop the run on a parameter this pipeline does not recognise.",
+                    "help_text": "Nextflow accepts any --name you type, so a misspelling would otherwise be set as an unused parameter and ignored without comment: --outdr would send your results somewhere you never asked for. Set this to false if a config of your own declares extra parameters that this pipeline does not."
+                }
+            }
+        }
+    },
+    "allOf": [
+        {
+            "$ref": "#/definitions/input"
+        },
+        {
+            "$ref": "#/definitions/output"
+        },
+        {
+            "$ref": "#/definitions/masking"
+        },
+        {
+            "$ref": "#/definitions/genome_completeness"
+        },
+        {
+            "$ref": "#/definitions/module_detection"
+        },
+        {
+            "$ref": "#/definitions/rescoring"
+        },
+        {
+            "$ref": "#/definitions/parallelism"
+        },
+        {
+            "$ref": "#/definitions/testing"
+        },
+        {
+            "$ref": "#/definitions/generic"
+        }
+    ]
+}

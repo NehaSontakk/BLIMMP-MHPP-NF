@@ -1,0 +1,232 @@
+# Runs the bundled test dataset on every push and pull request.
+#
+# The dataset is 2.4 MB and the pipeline finishes in about 30 seconds, so what
+# costs time here is pulling containers. See assets/test/README.md for how the
+# data was chosen.
+#
+# Three Nextflow versions, spanning the supported range. 26.04 is the one that
+# behaves differently: the strict syntax parser is on by default, and directive
+# strings are evaluated before any process runs. `nextflow lint` catches the
+# first of those and not the second, so only a run covers it.
+
+name: CI
+
+on:
+  push:
+    branches: [main, first_commit]
+  pull_request:
+  workflow_dispatch:
+
+# A second push to the same branch cancels the first. This repo is private, so
+# these are billed minutes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Seconds, no containers. Catches the two things that rot on their own: a
+  # parameter described in nextflow_schema.json but not in the docs, and a link
+  # between two pages that no longer lands anywhere.
+  docs:
+    name: Docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parameter table matches the schema
+        run: .github/scripts/param_table.py --check
+
+      - name: Internal links resolve
+        run: .github/scripts/check_links.py
+
+  docker:
+    name: Nextflow ${{ matrix.nextflow }}
+    runs-on: ubuntu-latest
+    strategy:
+      # One version failing should not hide the state of the other three.
+      fail-fast: false
+      matrix:
+        nextflow: ['22.10.7', '24.04.4', '25.10.4', '26.04.0']
+    env:
+      NXF_VER: ${{ matrix.nextflow }}
+      NXF_ANSI_LOG: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Java 17 covers the whole matrix: 22.10 accepts 11 through 18, and 17
+      # became the minimum at 24.11. The Nextflow installer does not install
+      # Java, so a version bump here can turn into a Java bump for users.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # The launcher downloads its runtime on first use, once per version.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.nextflow/capsule
+            ~/.nextflow/framework
+          key: nextflow-${{ matrix.nextflow }}
+
+      - name: Install Nextflow
+        run: |
+          curl -s https://get.nextflow.io | bash
+          sudo mv nextflow /usr/local/bin/
+          nextflow -version
+
+      # Costs seconds, and covers two entry points a pipeline run never reaches.
+      # Under 26.04 directive strings are evaluated before `--help` returns, so
+      # this step alone catches a bad one.
+      - name: Print help
+        run: nextflow run . --help
+
+      - name: Reject an unknown parameter
+        run: |
+          if nextflow run . --nosuchparam 1; then
+            echo "--nosuchparam was accepted; the parameter check has stopped working" >&2
+            exit 1
+          fi
+
+      # No chunk flags, so this covers the automatic sizing a real run gets.
+      - name: Run the bundled dataset
+        run: |
+          nextflow run . -profile test,docker 2>&1 | tee run.log
+          grep -q 'HMM chunks:' run.log
+          grep -q 'Override with --hmm_chunk_size' run.log
+
+      # Twenty profiles on a two-core runner autotune to a single chunk, so the
+      # several-chunks path, and MERGE_RESULTS having more than one file to
+      # merge, needs asking for it.
+      - name: Several chunks per genome
+        run: |
+          nextflow run . -profile test,docker --hmm_chunk_size 5 \
+              --outdir results_chunked -w work_chunked 2>&1 | tee chunked.log
+          assets/test/assert.sh results_chunked
+          grep -q 'Set by --hmm_chunk_size' chunked.log
+          searches=$(grep -c 'process > HMMSEARCH' chunked.log)
+          if [ "$searches" -ne 8 ]; then
+            echo "expected 8 HMMSEARCH tasks (2 genomes x 4 chunks), got $searches" >&2
+            exit 1
+          fi
+
+      # Exit 0 is not evidence: the pipeline can finish green having produced
+      # empty output. assert.sh checks numbers.
+      - name: Check the results
+        run: assets/test/assert.sh results_test
+
+      # Masking is on by default, so the run above already covers tantan. This
+      # covers the other side: --no_masking has to actually skip the process, not
+      # merely be accepted.
+      - name: Run the bundled dataset without masking
+        run: |
+          nextflow run . -profile test,docker --no_masking \
+              --outdir results_unmasked -w work_unmasked
+          assets/test/assert.sh results_unmasked
+          # Grepping the log for the process name matches Nextflow's own
+          # inventory of every process it parsed, which is printed whether or not
+          # the process ran. The masked FASTA is the thing that must not exist.
+          if find work_unmasked -name '*.masked.faa' | grep -q .; then
+            echo "MASK_REPEATS ran despite --no_masking" >&2
+            exit 1
+          fi
+
+      # A process with no stub: block aborts the whole stub run, and nothing
+      # else would notice. No containers here: stubs only touch files.
+      - name: Stub run
+        run: |
+          nextflow run . -profile test -stub-run \
+              --outdir results_stub -w work_stub
+          test -f results_stub/summary.tsv
+          test -f results_stub/module_matrix.tsv
+
+      - name: Show what failed
+        if: failure()
+        run: |
+          tail -80 .nextflow.log || true
+          for f in work*/*/*/.command.err; do
+            if [ -s "$f" ]; then
+              echo "=== $f ==="
+              tail -40 "$f"
+            fi
+          done
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: logs-nextflow-${{ matrix.nextflow }}
+          path: |
+            .nextflow.log
+            results_test/pipeline_info/
+          retention-days: 7
+
+  singularity:
+    # The engine this pipeline runs under on HPC, where Docker is unavailable. It
+    # differs from Docker in what it mounts and in whether the host environment
+    # reaches the container, which is what --cleanenv is for, so a green Docker
+    # job does not cover it.
+    name: Apptainer
+    runs-on: ubuntu-latest
+    env:
+      NXF_VER: '24.04.4'
+      NXF_ANSI_LOG: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.nextflow/capsule
+            ~/.nextflow/framework
+          key: nextflow-24.04.4
+
+      - name: Install Nextflow
+        run: |
+          curl -s https://get.nextflow.io | bash
+          sudo mv nextflow /usr/local/bin/
+
+      # Installed from the release .deb instead of a marketplace action, so the
+      # only third party this workflow trusts is GitHub. Apptainer ships a
+      # `singularity` command for compatibility, which is the name Nextflow's
+      # singularity support invokes.
+      - name: Install Apptainer
+        run: |
+          version=1.3.6
+          curl -fsSL -o apptainer.deb \
+            "https://github.com/apptainer/apptainer/releases/download/v${version}/apptainer_${version}_amd64.deb"
+          sudo apt-get install -y ./apptainer.deb
+          rm apptainer.deb
+          singularity --version
+
+      - name: Run the bundled dataset
+        run: nextflow run . -profile test,singularity
+
+      - name: Check the results
+        run: assets/test/assert.sh results_test
+
+      - name: Show what failed
+        if: failure()
+        run: |
+          tail -80 .nextflow.log || true
+          for f in work*/*/*/.command.err; do
+            if [ -s "$f" ]; then
+              echo "=== $f ==="
+              tail -40 "$f"
+            fi
+          done
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: logs-apptainer
+          path: |
+            .nextflow.log
+            results_test/pipeline_info/
+          retention-days: 7
