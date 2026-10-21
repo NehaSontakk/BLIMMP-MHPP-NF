@@ -145,10 +145,10 @@ mag_proteins,proteomes/mag_*.faa,0.83,
 nextflow run main.nf --input samples.csv --hmms /path/to/kofam/
 ```
 
-BUSCO cannot measure completeness from protein sequences, so a `sigma` value is the only way a
-protein row reaches BLIMMP. `mag_proteins` shows that a glob works here as well: several
-protein files get joined into one proteome, which needs none of the gene-model care that
-joining nucleotides does.
+Without `--busco_lineage`, a `sigma` value is the only way a protein row reaches BLIMMP — add
+`--busco_lineage` and BUSCO measures these too, in `proteins` mode instead of `genome` mode (see
+example 7). `mag_proteins` shows that a glob works here as well: several protein files get
+joined into one proteome, which needs none of the gene-model care that joining nucleotides does.
 
 ### 6. Genomes and proteins in one run
 
@@ -171,17 +171,19 @@ same for both.
 
 ### 7. Measuring with BUSCO and overriding two rows
 
-`--busco_lineage` works alongside a sheet. BUSCO measures each genome and fills in the blank
-`sigma` cells. A cell you filled in beats the measurement. With bins from several clades, name
-`auto_prok` instead of a dataset and BUSCO chooses one per row.
+`--busco_lineage` works alongside a sheet, on both `genome_files` and `protein_files` rows alike
+— BUSCO measures a genome row in `genome` mode and a protein row in `proteins` mode, and either
+way fills in the blank `sigma` cells. A cell you filled in beats the measurement. With bins from
+several clades, name `auto_prok` instead of a dataset and BUSCO chooses one per row.
 
 ```csv
-name,genome_files,sigma,taxonomy
-MED4,genomes/MED4.fna,,cyanobacteriota
-MIT9313,genomes/MIT9313.fna,,cyanobacteriota
-SS120,genomes/SS120.fna,,cyanobacteriota
-odd_assembly,genomes/odd.fna,0.55,cyanobacteriota
-known_complete,genomes/finished.fna,1.0,cyanobacteriota
+name,genome_files,protein_files,sigma,taxonomy
+MED4,genomes/MED4.fna,,,cyanobacteriota
+MIT9313,genomes/MIT9313.fna,,,cyanobacteriota
+SS120,genomes/SS120.fna,,,cyanobacteriota
+odd_assembly,genomes/odd.fna,,0.55,cyanobacteriota
+known_complete,genomes/finished.fna,,1.0,cyanobacteriota
+external_proteome,,proteomes/A.faa,,cyanobacteriota
 ```
 
 ```bash
@@ -192,8 +194,10 @@ nextflow run main.nf \
 ```
 
 The first three take whatever BUSCO measures. `odd_assembly` and `known_complete` use the
-numbers you typed, on the reasoning that you had a reason for typing them. BUSCO still runs on
-all five, so its summary table stays complete.
+numbers you typed, on the reasoning that you had a reason for typing them. `external_proteome`
+has no `genome_files` to call genes from, so BUSCO measures its proteins directly instead — same
+column, same fallback order, just a different BUSCO mode under the hood. BUSCO still runs on all
+six rows, so its summary table stays complete.
 
 The precedence is the cell, then BUSCO's measurement, then `--sigma`.
 

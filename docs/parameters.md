@@ -79,7 +79,7 @@ BLIMMP weighs a missing KO against how much of the genome is actually there. Tha
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `--busco_lineage` | string | none | Measure completeness per genome with BUSCO using this lineage, e.g. bacteria_odb12, or auto, auto_prok or auto_euk to let BUSCO pick one per genome. |
+| `--busco_lineage` | string | none | Measure completeness per sample with BUSCO using this lineage, e.g. bacteria_odb12, or auto, auto_prok or auto_euk to let BUSCO pick one per sample. |
 | `--busco_downloads` | directory | none | Directory holding already-downloaded BUSCO datasets, which makes the BUSCO step run offline. |
 | `--sigma` | number | none | State the completeness fraction instead of measuring it, e.g. 0.85 for a genome believed 85% complete. |
 

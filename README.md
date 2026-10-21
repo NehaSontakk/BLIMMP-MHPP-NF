@@ -92,10 +92,11 @@ nextflow run main.nf \
 `--genomes` takes a directory of `.fna`/`.fa`/`.fasta` files or a glob (point it at one file, or
 a directory with exactly one, to run a single genome); `--proteins` takes protein FASTAs instead
 and skips gene calling. `--hmms` takes one concatenated `.hmm` file or a directory of them.
-`--busco_lineage` measures how complete each genome is, which is what lets BLIMMP tell an absent
-pathway from an unsequenced one; `--busco_lineage auto_prok` lets BUSCO choose the lineage for
-each genome, and `--sigma 1.0` states the fraction yourself instead (use this for closed,
-single-contig assemblies — there's nothing for BUSCO to measure).
+`--busco_lineage` measures how complete each sample is, which is what lets BLIMMP tell an absent
+pathway from an unsequenced one — it works on `--proteins` too (BUSCO's `proteins` mode, instead
+of `genome` mode), not just `--genomes`; `--busco_lineage auto_prok` lets BUSCO choose the
+lineage for each sample, and `--sigma 1.0` states the fraction yourself instead (use this for
+closed, single-contig assemblies — there's nothing for BUSCO to measure).
 
 Results land in `results/`, one subdirectory per genome, holding the HMMER tables and
 BLIMMP_MHPP's per-module probabilities (`*_BLIMMP_substituted_*` files — see

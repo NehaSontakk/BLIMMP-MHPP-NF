@@ -33,7 +33,7 @@
                     "format": "path",
                     "fa_icon": "fas fa-bacteria",
                     "description": "Directory of protein FASTA files (.fa, .faa, .fasta), or a glob pattern. Skips pyrodigal.",
-                    "help_text": "BUSCO cannot measure completeness from protein sequences, so --sigma is the only way a protein run reaches BLIMMP. Without it the run annotates against KOfam and stops there."
+                    "help_text": "BUSCO measures completeness from protein sequences in proteins mode when --busco_lineage is given; --sigma works too and outranks a BUSCO measurement where both are set. Without either the run annotates against KOfam and stops there."
                 },
                 "hmms": {
                     "type": "string",
@@ -97,8 +97,8 @@
                 "busco_lineage": {
                     "type": "string",
                     "fa_icon": "fas fa-ruler",
-                    "description": "Measure completeness per genome with BUSCO using this lineage, e.g. bacteria_odb12, or auto, auto_prok or auto_euk to let BUSCO pick one per genome.",
-                    "help_text": "Needs nucleotide sequences. Use it when the missing fraction is real and unknown, meaning drafts and MAGs. The auto values place each genome on BUSCO's reference tree and score it against the deepest dataset that fits, which suits a set of bins from different clades; auto_prok and auto_euk skip the other domain and are faster. BUSCO runs at least twice per genome this way, so expect a few times the run time of a named dataset, and it may score two genomes in one run against different marker sets: busco_summary.tsv records which one measured each row. On an assembly you already consider complete, prefer --sigma 1.0: BUSCO does not return 1.0 for a closed genome, it returns how much of one clade's marker set it found, and that varies with the rank, so auto, which picks the deepest rank, is the wrong tool there. Refused together with --sigma on the command line, since both describe the whole run and nothing says which should win. With --input the two do combine, because a sheet establishes an order: the sigma cell wins, then BUSCO's measurement, then --sigma."
+                    "description": "Measure completeness per sample with BUSCO using this lineage, e.g. bacteria_odb12, or auto, auto_prok or auto_euk to let BUSCO pick one per sample.",
+                    "help_text": "Works on nucleotide genomes (--genomes/genome_files, BUSCO's genome mode) and on protein FASTAs (--proteins/protein_files, BUSCO's proteins mode) alike - BUSCO measures each row with whichever mode matches how it arrived. Use it when the missing fraction is real and unknown, meaning drafts and MAGs. The auto values place each genome on BUSCO's reference tree and score it against the deepest dataset that fits, which suits a set of bins from different clades; auto_prok and auto_euk skip the other domain and are faster. BUSCO runs at least twice per genome this way, so expect a few times the run time of a named dataset, and it may score two genomes in one run against different marker sets: busco_summary.tsv records which one measured each row. On an assembly you already consider complete, prefer --sigma 1.0: BUSCO does not return 1.0 for a closed genome, it returns how much of one clade's marker set it found, and that varies with the rank, so auto, which picks the deepest rank, is the wrong tool there. Refused together with --sigma on the command line, since both describe the whole run and nothing says which should win. With --input the two do combine, because a sheet establishes an order: the sigma cell wins, then BUSCO's measurement, then --sigma."
                 },
                 "busco_downloads": {
                     "type": "string",

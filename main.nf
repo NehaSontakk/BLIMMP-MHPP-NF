@@ -50,6 +50,7 @@ process PREDICT_PROTEINS {
     tag "${strain_id}"
     label 'process_low'
     container 'quay.io/biocontainers/pyrodigal:3.7.1--py313hd72fa03_0'
+    publishDir path: { "${params.outdir}/${strain_id}" }, mode: 'copy'
 
     input:
     tuple val(strain_id), path(genome)
@@ -242,15 +243,20 @@ process HMMSEARCH {
     output:
     tuple val(sample_id), path("${sample_id}.${hmm_chunk.baseName}.tblout"),    emit: tblout
     tuple val(sample_id), path("${sample_id}.${hmm_chunk.baseName}.domtblout"), emit: domtblout
+    tuple val(sample_id), path("${sample_id}.${hmm_chunk.baseName}.out"),       emit: alignments
 
     script:
+    // No --noali: that flag suppresses the per-domain alignment block in -o's
+    // human-readable output, which is the whole point of keeping -o around.
+    // tblout/domtblout stay the machine-readable record BLIMMP actually
+    // parses; this file is for a human (or BLAST-style eyeballing) to read
+    // the actual query/match/target alignment behind a given hit.
     """
     hmmsearch \
-        --noali \
         --cpu ${task.cpus} \
         --tblout  ${sample_id}.${hmm_chunk.baseName}.tblout \
         --domtblout ${sample_id}.${hmm_chunk.baseName}.domtblout \
-        -o /dev/null \
+        -o ${sample_id}.${hmm_chunk.baseName}.out \
         ${hmm_chunk} ${proteins}
     """
 
@@ -258,6 +264,7 @@ process HMMSEARCH {
     """
     touch ${sample_id}.${hmm_chunk.baseName}.tblout
     touch ${sample_id}.${hmm_chunk.baseName}.domtblout
+    touch ${sample_id}.${hmm_chunk.baseName}.out
     """
 }
 
@@ -300,10 +307,10 @@ process MERGE_RESULTS {
     publishDir path: { "${params.outdir}/${sample_id}" }, mode: 'copy'
 
     input:
-    tuple val(sample_id), path('tblout/*'), path('domtblout/*')
+    tuple val(sample_id), path('tblout/*'), path('domtblout/*'), path('alignments/*')
 
     output:
-    tuple val(sample_id), path("${sample_id}.tblout"), path("${sample_id}.domtblout")
+    tuple val(sample_id), path("${sample_id}.tblout"), path("${sample_id}.domtblout"), path("${sample_id}.out")
 
     script:
     """
@@ -318,12 +325,22 @@ process MERGE_RESULTS {
     for f in domtblout/*; do
         grep -v '^#' "\$f" >> ${sample_id}.domtblout || true
     done
+
+    # --- alignments (-o output) ---
+    # Human-readable text, not tabular, so chunks are concatenated as-is
+    # rather than header-stripped, each labelled by its source chunk.
+    > ${sample_id}.out
+    for f in alignments/*; do
+        echo "==> \$(basename "\$f") <==" >> ${sample_id}.out
+        cat "\$f" >> ${sample_id}.out
+    done
     """
 
     stub:
     """
     touch ${sample_id}.tblout
     touch ${sample_id}.domtblout
+    touch ${sample_id}.out
     """
 }
 
@@ -389,8 +406,12 @@ def checkBuscoAutoDownloads() {
 }
 
 /*
- * Assess genome completeness with BUSCO.
- * Only runs when --busco_lineage is provided. Requires --genomes (not --proteins).
+ * Assess completeness with BUSCO, on nucleotide genomes or on protein FASTAs.
+ * Only runs when --busco_lineage is provided. busco_mode is 'genome' for
+ * --genomes/genome_files rows and 'proteins' for --proteins/protein_files rows
+ * (BUSCO's own -m vocabulary, used directly) - summary file naming and the
+ * JSON schema BUSCO writes are identical between the two modes, verified
+ * against a real protein FASTA, so the parsing below needs no branching.
  * Publishes the full BUSCO output directory and a per-genome TSV of
  * sample_id, completeness fraction, and the dataset that measured it.
  */
@@ -401,7 +422,7 @@ process RUN_BUSCO {
     publishDir path: { "${params.outdir}/${strain_id}" }, mode: 'copy'
 
     input:
-    tuple val(strain_id), path(genome)
+    tuple val(strain_id), path(genome), val(busco_mode)
 
     output:
     path "busco_${strain_id}/"
@@ -423,7 +444,7 @@ process RUN_BUSCO {
     // named. Auto-lineage also leaves a short_summary.generic.* from the root
     // dataset beside it; the specific one is the result.
     """
-    busco -i ${genome} -o busco_${strain_id} ${lineage_arg} -m genome -c ${task.cpus} ${offline}
+    busco -i ${genome} -o busco_${strain_id} ${lineage_arg} -m ${busco_mode} -c ${task.cpus} ${offline}
     summary=\$(ls busco_${strain_id}/short_summary.specific.*.busco_${strain_id}.json)
     [ \$(printf '%s\\n' \${summary} | wc -l) -eq 1 ] || { echo "Expected one specific summary, found: \${summary}" >&2; exit 1; }
     python3 - "\${summary}" ${strain_id} > ${strain_id}.busco_completeness.tsv <<'PY'
@@ -1295,8 +1316,6 @@ workflow {
         error "Provide --hmms (path to Kofam profiles.hmm)"
     if (params.hmm_chunk_size && params.hmm_chunks)
         error "Provide --hmm_chunk_size or --hmm_chunks, not both"
-    if (params.busco_lineage && params.proteins)
-        error "--busco_lineage needs nucleotide sequences (BUSCO cannot measure completeness from proteins)"
     if (params.busco_downloads && !params.busco_lineage)
         error "--busco_downloads only does something with --busco_lineage, which is what runs BUSCO"
     if (params.busco_downloads && !file(params.busco_downloads).isDirectory()) {
@@ -1347,11 +1366,6 @@ workflow {
             samples = samples.take(params.subsample_genomes as int)
             log.info "Subsampling to ${samples.size()} samples"
         }
-        if (params.busco_lineage && !samples.any { !it.from_proteins })
-            error """--busco_lineage needs at least one row with genome_files.
-             |  Every row in ${params.input} starts from proteins, and BUSCO measures
-             |  completeness from nucleotide sequences.""".stripMargin()
-
         // A process can only be invoked once per workflow, so both kinds of
         // multi-file row go through CONCAT_INPUTS together and are told apart
         // afterwards by name. Single-file rows skip it, which is what keeps their
@@ -1411,9 +1425,17 @@ workflow {
         proteins_ch = MASK_REPEATS.out
     }
 
-    // ---- BUSCO genome completeness (optional) ----
+    // ---- BUSCO completeness (optional) ----
+    //
+    // Genome rows get genome mode; rows that arrived as proteins (--proteins,
+    // or protein_files in a samplesheet) get protein mode instead of being
+    // left out - BUSCO's own -m vocabulary names both, and the summary file
+    // BUSCO writes is identical in shape either way, so RUN_BUSCO's parsing
+    // needs no branching, only the mode tag threaded through the input tuple.
     if (params.busco_lineage) {
-        RUN_BUSCO(genomes_ch)
+        busco_in = genomes_ch.map { id, f -> tuple(id, f, 'genome') }
+            .mix(ready_proteins_ch.map { id, f -> tuple(id, f, 'proteins') })
+        RUN_BUSCO(busco_in)
         BUSCO_SUMMARY(RUN_BUSCO.out.completeness.map { _id, tsv -> tsv }.collect())
         busco_completeness_ch = RUN_BUSCO.out.completeness  // tuple(id, tsv)
     }
@@ -1436,17 +1458,18 @@ workflow {
     merge_in = HMMSEARCH.out.tblout
         .groupTuple()
         .join(HMMSEARCH.out.domtblout.groupTuple())
+        .join(HMMSEARCH.out.alignments.groupTuple())
     MERGE_RESULTS(merge_in)
 
     // ---- Post-processing (runs once, after all merges complete) ----
-    POSTPROCESS(MERGE_RESULTS.out.map { _id, tblout, _domtblout -> tblout }.collect())
+    POSTPROCESS(MERGE_RESULTS.out.map { _id, tblout, _domtblout, _out -> tblout }.collect())
 
     // ---- BLIMMP module detection ----
     //
     // Runs whenever sigma can be established: measured per genome by BUSCO, or
     // stated once with --sigma. With neither, the run stops after annotation,
     // and says so rather than leaving you to notice the missing files.
-    domtblout_ch = MERGE_RESULTS.out.map { id, _tblout, domtblout -> tuple(id, domtblout) }
+    domtblout_ch = MERGE_RESULTS.out.map { id, _tblout, domtblout, _out -> tuple(id, domtblout) }
 
     // Per-sample sigma and taxonomy, looked up by name. Both empty without a
     // samplesheet, where the run-level flags supply them instead.
@@ -1454,33 +1477,24 @@ workflow {
     def sheet_taxonomy = samples ? samples.collectEntries { [(it.name): it.taxonomy] } : [:]
 
     // Rows BLIMMP cannot score, named now rather than left to be discovered as
-    // missing files afterwards. Under --busco_lineage a genome row always gets a
-    // measurement, so only protein rows can land here.
+    // missing files afterwards. Under --busco_lineage every row, genome or
+    // protein, always gets a measurement, so only a run with neither
+    // --busco_lineage nor any sigma anywhere lands rows here.
     def unscored = (samples ?: [])
-        .findAll { s -> s.sigma == null && sigma_value == null &&
-                        !(params.busco_lineage && !s.from_proteins) }
+        .findAll { s -> s.sigma == null && sigma_value == null && !params.busco_lineage }
         .collect { it.name }
     if (unscored)
         log.warn "BLIMMP will not run for ${unscored.join(', ')}: no completeness estimate. Fill in the sigma column on those rows, or pass --sigma. They are annotated against KOfam and stop there."
 
     def blimmp_in = null
     if (params.busco_lineage) {
-        // BUSCO measures one value per genome. A filled-in sigma cell outranks it.
+        // BUSCO now measures every row, genome or protein (see the BUSCO
+        // completeness block above). A filled-in sigma cell outranks the
+        // measurement either way.
         blimmp_in = domtblout_ch
             .join(busco_completeness_ch.map { id, tsv -> tuple(id, tsv.text.tokenize()[1]) })
             .map { id, domtblout, measured ->
                 tuple(id, domtblout, sheet_sigma[id] ?: measured, taxonomyFor(id, sheet_taxonomy)) }
-
-        // Protein rows never reach BUSCO, so they would drop out of that join
-        // even when their own sigma is sitting right there in the sheet.
-        def scored_proteins = (samples ?: [])
-            .findAll { it.from_proteins && (it.sigma ?: sigma_value) != null }
-            .collect { it.name } as Set
-        if (scored_proteins)
-            blimmp_in = blimmp_in.mix(
-                domtblout_ch.filter { scored_proteins.contains(it[0]) }
-                    .map { id, domtblout ->
-                        tuple(id, domtblout, sheet_sigma[id] ?: sigma_value, taxonomyFor(id, sheet_taxonomy)) })
     }
     else if (sigma_value != null || sheet_sigma.any { _name, value -> value != null }) {
         blimmp_in = domtblout_ch
@@ -1495,10 +1509,10 @@ workflow {
         MODULE_MATRIX(RUN_BLIMMP.out.probabilities.collect())
     }
     else if (params.proteins) {
-        // BUSCO reads nucleotides, so --proteins has no way to measure sigma.
+        // Reached without --busco_lineage and without any sigma anywhere.
         // Annotation on its own is a legitimate use of this pipeline, so this
         // is a warning rather than a refusal.
-        log.warn "BLIMMP will not run: it needs --sigma, and BUSCO cannot measure completeness from protein sequences. Use --sigma 1.0 if the proteomes are complete. Continuing with HMMER annotation only."
+        log.warn "BLIMMP will not run: it needs --sigma or --busco_lineage to establish completeness. Use --sigma 1.0 if the proteomes are complete. Continuing with HMMER annotation only."
     }
     else {
         log.warn "BLIMMP will not run: no completeness estimate. Add --busco_lineage to measure it, or --sigma to state it. Continuing with HMMER annotation only."

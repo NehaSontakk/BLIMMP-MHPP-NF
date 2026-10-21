@@ -87,9 +87,12 @@ sigma, and you supply it one of two ways.
 assemblies, finished RefSeq genomes, anything you would describe as a genome rather than a
 draft.
 
-`--sigma 0.85` states one value for every input. Use it when you know the fraction, and when you
-are starting from proteins, where BUSCO has nothing to measure and `--sigma` is the only route
-to BLIMMP at all.
+`--sigma 0.85` states one value for every input. Use it when you know the fraction, or to
+outrank BUSCO's own measurement for a particular run.
+
+`--busco_lineage` works on `--proteins` too, not just `--genomes`: BUSCO runs in `proteins`
+mode instead of `genome` mode, searching the protein set directly rather than calling genes
+first. Starting from proteins is no longer a reason `--sigma` is the only route to BLIMMP.
 
 `--busco_lineage bacteria_odb12` measures sigma per genome with BUSCO. Reach for it when the
 missing fraction is real and unknown: drafts, MAGs, anything assembled from short reads and left
