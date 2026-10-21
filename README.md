@@ -20,44 +20,16 @@ the MHPP module), optionally measures genome completeness with BUSCO, and runs B
 infer the probability that each KEGG module — including MHPP001 — is present, accounting for
 what a draft assembly is missing.
 
-## Before anything else: this needs a container you have to build yourself
-
-Unlike upstream BLIMMP, `BLIMMP_MHPP` has no published container image yet. **`docker` and
-`singularity` profiles will not work until you build and tag the image locally** (or push it
-somewhere and point `main.nf` at that instead). `BLIMMP_MHPP` is also a **private** repository,
-so you need both GitHub access to it and a personal access token to build its container (one of
-its data directories ships as a private Release asset).
-
-```bash
-# 1. Clone the BLIMMP_MHPP source (you need collaborator access to this repo).
-git clone https://github.com/NehaSontakk/BLIMMP_MHPP.git
-cd BLIMMP_MHPP
-
-# 2. Build the image. The cooccurrence lookup data is a private Release asset,
-#    so the build needs a GitHub token with access to this repo, passed as a
-#    BuildKit secret — never as a plain ARG/ENV, so it never lands in an image layer.
-export GH_TOKEN=$(gh auth token)   # or any PAT with read access to this repo
-DOCKER_BUILDKIT=1 docker build --secret id=gh_token,env=GH_TOKEN \
-    -t ghcr.io/nehasontakk/blimmp_mhpp:26sep2026-mhpp1 .
-unset GH_TOKEN
-```
-
-The tag `ghcr.io/nehasontakk/blimmp_mhpp:26sep2026-mhpp1` has to match exactly what's named in
-the `container` directive of the `RUN_BLIMMP` process in [`main.nf`](main.nf) — Docker/Singularity
-will happily use a matching local image without ever reaching the registry, so nothing here
-requires `docker push` to actually run the pipeline. If you change the tag in one place, change it
-in the other.
-
-Building takes a few minutes; the cooccurrence asset alone is about 1 GB.
-
 ## Check that it works, in about 30 seconds
-
-Once the container is built:
 
 ```bash
 nextflow run main.nf -profile test,docker
 assets/test/assert.sh results_test
 ```
+
+Nothing to build first: `ghcr.io/nehasontakk/blimmp_mhpp` is a public image, and Docker/Singularity
+pulls it automatically the first time `RUN_BLIMMP` needs it, same as the public images every other
+step in this pipeline uses.
 
 Bundled data: two 150 kb slices of real *Prochlorococcus* genomes against 20 KOfam profiles.
 `assert.sh` then checks that the run found the KOs it should have, because a pipeline can exit 0
@@ -164,14 +136,9 @@ nextflow run main.nf ... -profile laptop,docker -c local_mount.config
   step that catches people out. See [getting Nextflow](docs/configuration.md#getting-nextflow).
   (`brew install nextflow` on macOS pulls in a working Java automatically.)
 - [Docker](https://www.docker.com/), or [Singularity/Apptainer](https://apptainer.org/) on HPC.
-  HMMER, pyrodigal, tantan and BUSCO all run in public containers. **BLIMMP_MHPP does not** — see
-  [above](#before-anything-else-this-needs-a-container-you-have-to-build-yourself). Without a
-  container profile you'd need HMMER 3.x, pyrodigal 3.x, tantan, BUSCO 6.x and BLIMMP_MHPP
-  installed yourself; BUSCO and BLIMMP_MHPP have no supported non-container path here.
-- **Collaborator access to [NehaSontakk/BLIMMP_MHPP](https://github.com/NehaSontakk/BLIMMP_MHPP)**
-  (private repo) and a GitHub token with read access to it, to build the container.
-  [`gh`](https://cli.github.com/) (`gh auth login`) is the easiest way to get one
-  (`gh auth token`).
+  HMMER, pyrodigal, tantan, BUSCO and BLIMMP_MHPP all run in public containers — nothing to build.
+  Without a container profile you'd need HMMER 3.x, pyrodigal 3.x, tantan, BUSCO 6.x and
+  BLIMMP_MHPP installed yourself; BUSCO and BLIMMP_MHPP have no supported non-container path here.
 - The KOfam HMM profiles, 27,816 of them (release `2026-07-02`), about 7.2 GB extracted.
   `./fetch_reference_data.sh --kofam /path/to/kofam` downloads and unpacks them from
   [GenomeNet](https://www.genome.jp/ftp/db/kofam/). The same script fetches example genomes and a
