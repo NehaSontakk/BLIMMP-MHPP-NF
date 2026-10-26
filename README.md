@@ -20,6 +20,36 @@ the MHPP module), optionally measures genome completeness with BUSCO, and runs B
 infer the probability that each KEGG module — including MHPP001 — is present, accounting for
 what a draft assembly is missing.
 
+## Installation
+
+1. **Install Nextflow** (22.10 or later; needs Java 11, or Java 17 for Nextflow 24.11+):
+
+   ```bash
+   curl -s https://get.nextflow.io | bash
+   mkdir -p ~/bin && mv nextflow ~/bin/   # make sure ~/bin is on your PATH
+   nextflow -version
+   ```
+
+   On macOS, `brew install nextflow` pulls in a working Java automatically. On a cluster, try
+   `module load nextflow` first. Full details — the Java-version pairing, installing Java with
+   SDKMAN, running a specific Nextflow version, cluster module systems — are in
+   [docs/configuration.md § Getting Nextflow](docs/configuration.md#getting-nextflow).
+
+2. **Install Docker**, or **Singularity/Apptainer** on HPC. Every tool this pipeline uses —
+   pyrodigal, tantan, HMMER, BUSCO, and BLIMMP_MHPP — runs in a public container image that's
+   pulled automatically, so this is the only other thing to install:
+   - Docker Desktop: <https://www.docker.com/products/docker-desktop/>
+   - Singularity/Apptainer: <https://apptainer.org/>
+
+3. **Clone this repository**:
+
+   ```bash
+   git clone https://github.com/NehaSontakk/BLIMMP-MHPP-NF.git
+   cd BLIMMP-MHPP-NF
+   ```
+
+Nothing else to build or configure — continue to **Check that it works** below.
+
 ## Check that it works, in about 30 seconds
 
 ```bash
@@ -36,11 +66,6 @@ Bundled data: two 150 kb slices of real *Prochlorococcus* genomes against 20 KOf
 having produced nothing at all. Swap `docker` for `singularity` on a cluster.
 
 ## Quick start
-
-```bash
-git clone https://github.com/NehaSontakk/BLIMMP-MHPP-NF.git
-cd BLIMMP-MHPP-NF
-```
 
 Pick a profile: where the work runs, then where the tools come from. Nothing to copy or edit.
 
