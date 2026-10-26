@@ -64,27 +64,37 @@ Nothing else to build or configure — continue to **Check that it works** below
 
 ## Check that it works, in about 30 seconds
 
-Pick the command that matches what you installed above — these are not interchangeable, and
-running the Docker one where only Singularity exists fails immediately with
-`docker: command not found`.
+First, check which one you actually have — don't guess:
 
-With Docker:
+```bash
+docker --version          # prints a version if you have Docker
+singularity --version     # prints a version if you have Singularity
+apptainer --version       # prints a version if you have Apptainer
+```
+
+Whichever one printed a version (not "command not found") is the one you have. Run the matching
+block below exactly as written — nothing in it needs editing, and nothing about this step needs a
+scheduler or a specific cluster, even if you're on one:
+
+If `docker --version` worked:
 
 ```bash
 nextflow run main.nf -profile test,docker
 assets/test/assert.sh results_test
 ```
 
-With Singularity/Apptainer:
+If `singularity --version` or `apptainer --version` worked:
 
 ```bash
 nextflow run main.nf -profile test,singularity
 assets/test/assert.sh results_test
 ```
 
-Either one runs right here, on whatever machine you type it on — nothing about this step needs a
-scheduler or a specific cluster, even if you're on one. Submitting to a scheduler for a real run
-is a separate choice you make later, covered in [Quick start](#quick-start) below.
+**On a shared or HPC machine, a plain interactive shell may only give you 1 CPU**, which is below
+what one of the steps asks for (2). If you see `Process requirement exceeds available CPUs`, it's
+this, not a real failure — request more CPUs for your interactive session (the exact command
+varies by cluster; on UA HPC it's `idev -c 2`) and rerun the same command with `-resume` appended,
+which picks up from the step that failed instead of starting over.
 
 Nothing to build first: `ghcr.io/nehasontakk/blimmp_mhpp` is a public image, and Docker/Singularity
 pulls it automatically the first time `RUN_BLIMMP` needs it, same as the public images every other
@@ -107,10 +117,24 @@ Pick a profile: where the work runs, then where the tools come from. Nothing to 
 | TACC Stampede3 | `singularity` with [`conf/stampede3.config`](conf/stampede3.config), and no `slurm`: jobs get whole nodes, so Nextflow schedules inside one allocation |
 | Tools already on `PATH` | just `laptop` |
 
+Three things in the command below need replacing with your own values; everything else — every
+flag name, `bacteria_odb12`, the whole shape of the command — stays exactly as written:
+
 ```bash
 nextflow run main.nf \
-    --genomes /path/to/genomes/ \
-    --hmms /path/to/kofam/ \
+    --genomes <path to your genome files> \
+    --hmms <path to your KOfam profiles> \
+    --busco_lineage bacteria_odb12 \
+    -profile <profile from the table above>
+```
+
+For example, if your genomes are in `~/genomes/`, your KOfam profiles in `~/kofam/`, and you're
+on a laptop with Docker, the command you'd actually type is:
+
+```bash
+nextflow run main.nf \
+    --genomes ~/genomes/ \
+    --hmms ~/kofam/ \
     --busco_lineage bacteria_odb12 \
     -profile laptop,docker
 ```
@@ -133,20 +157,37 @@ lists every parameter.
 
 The MHPP001 module needs its marker KO, `K99001` (placeholder for the `pme` enzyme), which is
 **not yet packaged anywhere versioned** — you have to supply `K99001.hmm` yourself and drop it
-into whatever `--hmms` directory you point at, alongside the regular KOfam profiles:
+into whatever `--hmms` directory you point at, alongside the regular KOfam profiles. Three things
+to replace: where you want the KOfam profiles downloaded to, where your own copy of `K99001.hmm`
+currently is, and your genome file:
 
 ```bash
-./fetch_reference_data.sh --kofam /path/to/kofam/   # full KOfam, ~7.2 GB extracted
-cp /path/to/K99001.hmm /path/to/kofam/
+./fetch_reference_data.sh --kofam <where to put the KOfam profiles>   # full KOfam, ~7.2 GB extracted
+cp <path to your copy of K99001.hmm> <same KOfam path as above>
 
 nextflow run main.nf \
-    --genomes /path/to/genome.fna \
-    --hmms /path/to/kofam/ \
+    --genomes <path to one genome file> \
+    --hmms <same KOfam path as above> \
+    --sigma 1.0 \
+    -profile <profile from the table above>
+```
+
+Worked example — KOfam going to `~/kofam/`, your own `K99001.hmm` sitting in `~/Downloads/`, one
+genome at `~/genomes/strain1.fna`, laptop with Docker:
+
+```bash
+./fetch_reference_data.sh --kofam ~/kofam/
+cp ~/Downloads/K99001.hmm ~/kofam/
+
+nextflow run main.nf \
+    --genomes ~/genomes/strain1.fna \
+    --hmms ~/kofam/ \
     --sigma 1.0 \
     -profile laptop,docker
 ```
 
-Then check the module's confidence:
+Then check the module's confidence (replace `<sample>` with your genome's name, which matches the
+filename you gave `--genomes` minus its extension):
 
 ```bash
 grep MHPP001 results/<sample>/<sample>_BLIMMP_substituted_module_probabilities.csv
@@ -158,17 +199,22 @@ individual symlinks isn't practical), so Docker never automatically sees it — 
 staged files, which Nextflow auto-binds by resolving their symlink targets. Singularity's
 `autoMounts` doesn't cover this either (see the "needs a bind of your own" note in
 [docs/hpc.md § BUSCO lineages, and why to download one first](docs/hpc.md#busco-lineages-and-why-to-download-one-first),
-which covers the same gap for `--busco_downloads`). On plain Docker Desktop, add a one-off config:
+which covers the same gap for `--busco_downloads`). On plain Docker Desktop, add a one-off config
+— replace both copies of the path with your actual `--hmms` path (it must be the same path on
+both sides of the colon):
 
 ```groovy
 // local_mount.config
 docker {
-    runOptions = '-u $(id -u):$(id -g) -v /path/to/kofam:/path/to/kofam'
+    runOptions = '-u $(id -u):$(id -g) -v <your --hmms path>:<your --hmms path>'
 }
 ```
 
+Then add `-c local_mount.config` to whichever `nextflow run` command you were already running —
+nothing else about it changes:
+
 ```bash
-nextflow run main.nf ... -profile laptop,docker -c local_mount.config
+nextflow run main.nf --genomes ... --hmms ... -profile laptop,docker -c local_mount.config
 ```
 
 ## Documentation
