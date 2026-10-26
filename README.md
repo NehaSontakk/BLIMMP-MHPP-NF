@@ -92,14 +92,16 @@ assets/test/assert.sh results_test
 
 **On a shared or HPC machine, a plain interactive shell may only give you 1 CPU**, which is below
 what one of the steps asks for (2). If you see `Process requirement exceeds available CPUs`, it's
-this, not a real failure — request an interactive session with at least 2 CPUs instead. Both the
-command and the flag for CPU count are specific to each cluster's own wrapper scripts (not
-something this pipeline controls), so check `--help` on whatever your site uses, e.g.:
+this, not a real failure — request an interactive session with at least 2 CPUs (`-n` on UA HPC's
+`interactive` wrapper is total tasks, which maps to CPUs for this purpose):
 
 ```bash
-interactive --help   # UA HPC; look for the CPU/core-count flag
-idev --help           # some other clusters use this name instead
+interactive -n 2 -a <your account> -t 00:15:00   # UA HPC
 ```
+
+The command and flags are specific to each cluster's own wrapper scripts (not something this
+pipeline controls) — on anything else, check `--help` on whatever interactive-session command
+your site uses (`idev`, `salloc`, etc.) for its CPU/core-count flag.
 
 Then rerun the same command with `-resume` appended, which picks up from the step that failed
 instead of starting over.
