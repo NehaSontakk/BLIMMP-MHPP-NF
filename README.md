@@ -41,6 +41,18 @@ what a draft assembly is missing.
    - Docker Desktop: <https://www.docker.com/products/docker-desktop/>
    - Singularity/Apptainer: <https://apptainer.org/>
 
+   **On HPC, don't actually install this yourself** — no root access, and the cluster almost
+   certainly already has it. `module load singularity` (or `apptainer`) failing with "unknown
+   module" doesn't mean it's missing; check whether it's just on `PATH` already instead:
+
+   ```bash
+   which singularity apptainer
+   module avail 2>&1 | grep -i -E "singular|apptain"
+   ```
+
+   Many clusters ship it as a system-wide binary (no module needed) rather than, or in addition
+   to, a module — worth checking before assuming it needs installing.
+
 3. **Clone this repository**:
 
    ```bash
