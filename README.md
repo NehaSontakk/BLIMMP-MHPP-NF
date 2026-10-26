@@ -65,26 +65,26 @@ Nothing else to build or configure — continue to **Check that it works** below
 ## Check that it works, in about 30 seconds
 
 Pick the command that matches what you installed above — these are not interchangeable, and
-running the Docker one where only Singularity exists (e.g. on HPC) fails immediately with
+running the Docker one where only Singularity exists fails immediately with
 `docker: command not found`.
 
-Laptop or workstation, with Docker:
+With Docker:
 
 ```bash
 nextflow run main.nf -profile test,docker
 assets/test/assert.sh results_test
 ```
 
-HPC, with Singularity/Apptainer:
+With Singularity/Apptainer:
 
 ```bash
-nextflow run main.nf -profile test,uahpc,singularity
+nextflow run main.nf -profile test,singularity
 assets/test/assert.sh results_test
 ```
 
-(`uahpc` is University of Arizona HPC specifically; on any other Slurm cluster use
-`-profile test,slurm,singularity` plus the [site config](docs/configuration.md#another-slurm-cluster)
-naming your account and partition.)
+Either one runs right here, on whatever machine you type it on — nothing about this step needs a
+scheduler or a specific cluster, even if you're on one. Submitting to a scheduler for a real run
+is a separate choice you make later, covered in [Quick start](#quick-start) below.
 
 Nothing to build first: `ghcr.io/nehasontakk/blimmp_mhpp` is a public image, and Docker/Singularity
 pulls it automatically the first time `RUN_BLIMMP` needs it, same as the public images every other
