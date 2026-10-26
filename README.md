@@ -139,7 +139,12 @@ That's 27,816 profiles, about 7.2 GB extracted, pulled from a pinned snapshot on
 Safe to re-run if interrupted: it checks what's already there and skips it rather than
 re-downloading from scratch.
 
-Pick a profile: where the work runs, then where the tools come from. Nothing to copy or edit.
+**Already have a KOfam profiles directory from somewhere else?** Skip the download entirely —
+point `--hmms` at it and go straight to the command below.
+
+The table below is just a lookup: find your row, and that's what goes in place of `<profile from
+the table above>` in the `-profile` flag of the command right after it. Nothing to copy from the
+table itself, and nothing to run from it on its own.
 
 | your machine | `-profile` |
 |---|---|
