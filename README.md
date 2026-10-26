@@ -92,9 +92,17 @@ assets/test/assert.sh results_test
 
 **On a shared or HPC machine, a plain interactive shell may only give you 1 CPU**, which is below
 what one of the steps asks for (2). If you see `Process requirement exceeds available CPUs`, it's
-this, not a real failure — request more CPUs for your interactive session (the exact command
-varies by cluster; on UA HPC it's `idev -c 2`) and rerun the same command with `-resume` appended,
-which picks up from the step that failed instead of starting over.
+this, not a real failure — request an interactive session with at least 2 CPUs instead. Both the
+command and the flag for CPU count are specific to each cluster's own wrapper scripts (not
+something this pipeline controls), so check `--help` on whatever your site uses, e.g.:
+
+```bash
+interactive --help   # UA HPC; look for the CPU/core-count flag
+idev --help           # some other clusters use this name instead
+```
+
+Then rerun the same command with `-resume` appended, which picks up from the step that failed
+instead of starting over.
 
 Nothing to build first: `ghcr.io/nehasontakk/blimmp_mhpp` is a public image, and Docker/Singularity
 pulls it automatically the first time `RUN_BLIMMP` needs it, same as the public images every other
