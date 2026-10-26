@@ -126,6 +126,19 @@ having produced nothing at all.
 
 ## Quick start
 
+Unlike the bundled test above (which ships 20 profiles just to prove the pipeline runs), a real
+genome needs the full KOfam database — download it once, reuse it for every run after:
+
+```bash
+./fetch_reference_data.sh --kofam <where to put it>
+```
+
+That's 27,816 profiles, about 7.2 GB extracted, pulled from a pinned snapshot on
+[GenomeNet](https://www.genome.jp/ftp/db/kofam/archives/2026-07-02/) (the script's own source —
+`profiles.tar.gz` plus `ko_list.gz` — if you'd rather download it yourself than run the script).
+Safe to re-run if interrupted: it checks what's already there and skips it rather than
+re-downloading from scratch.
+
 Pick a profile: where the work runs, then where the tools come from. Nothing to copy or edit.
 
 | your machine | `-profile` |
