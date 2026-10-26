@@ -103,6 +103,16 @@ The command and flags are specific to each cluster's own wrapper scripts (not so
 pipeline controls) — on anything else, check `--help` on whatever interactive-session command
 your site uses (`idev`, `salloc`, etc.) for its CPU/core-count flag.
 
+**A new interactive session starts with a fresh shell — anything you `module load`ed before is
+gone.** Load Nextflow (and Singularity/Apptainer, if your site provides those as modules rather
+than system-wide binaries) again before rerunning:
+
+```bash
+module load nextflow
+module load singularity   # or apptainer -- only if `which singularity apptainer` found nothing
+                           # earlier; many sites don't module this one at all
+```
+
 Then rerun the same command with `-resume` appended, which picks up from the step that failed
 instead of starting over.
 
