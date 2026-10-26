@@ -64,10 +64,27 @@ Nothing else to build or configure — continue to **Check that it works** below
 
 ## Check that it works, in about 30 seconds
 
+Pick the command that matches what you installed above — these are not interchangeable, and
+running the Docker one where only Singularity exists (e.g. on HPC) fails immediately with
+`docker: command not found`.
+
+Laptop or workstation, with Docker:
+
 ```bash
 nextflow run main.nf -profile test,docker
 assets/test/assert.sh results_test
 ```
+
+HPC, with Singularity/Apptainer:
+
+```bash
+nextflow run main.nf -profile test,uahpc,singularity
+assets/test/assert.sh results_test
+```
+
+(`uahpc` is University of Arizona HPC specifically; on any other Slurm cluster use
+`-profile test,slurm,singularity` plus the [site config](docs/configuration.md#another-slurm-cluster)
+naming your account and partition.)
 
 Nothing to build first: `ghcr.io/nehasontakk/blimmp_mhpp` is a public image, and Docker/Singularity
 pulls it automatically the first time `RUN_BLIMMP` needs it, same as the public images every other
@@ -75,7 +92,7 @@ step in this pipeline uses.
 
 Bundled data: two 150 kb slices of real *Prochlorococcus* genomes against 20 KOfam profiles.
 `assert.sh` then checks that the run found the KOs it should have, because a pipeline can exit 0
-having produced nothing at all. Swap `docker` for `singularity` on a cluster.
+having produced nothing at all.
 
 ## Quick start
 
