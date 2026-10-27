@@ -193,15 +193,15 @@ lists every parameter.
 
 ### Testing the MHPP module specifically
 
-The MHPP001 module needs its marker KO, `K99001` (placeholder for the `pme` enzyme), which is
-**not yet packaged anywhere versioned** — you have to supply `K99001.hmm` yourself and drop it
-into whatever `--hmms` directory you point at, alongside the regular KOfam profiles. Three things
-to replace: where you want the KOfam profiles downloaded to, where your own copy of `K99001.hmm`
-currently is, and your genome file:
+The MHPP001 module needs its marker KO, `K99001` (placeholder for the `pme` enzyme), which isn't
+part of official KOfam — it's a custom profile, bundled in this repo at
+[`assets/K99001.hmm`](assets/K99001.hmm). Copy it into whatever `--hmms` directory you point at,
+alongside the regular KOfam profiles, before running. Two things to replace: where you want the
+KOfam profiles downloaded to, and your genome file:
 
 ```bash
 ./fetch_reference_data.sh --kofam <where to put the KOfam profiles>   # full KOfam, ~7.2 GB extracted
-cp <path to your copy of K99001.hmm> <same KOfam path as above>
+cp assets/K99001.hmm <same KOfam path as above>
 
 nextflow run main.nf \
     --genomes <path to one genome file> \
@@ -210,12 +210,12 @@ nextflow run main.nf \
     -profile <profile from the table above>
 ```
 
-Worked example — KOfam going to `~/kofam/`, your own `K99001.hmm` sitting in `~/Downloads/`, one
-genome at `~/genomes/strain1.fna`, laptop with Docker:
+Worked example — KOfam going to `~/kofam/`, one genome at `~/genomes/strain1.fna`, laptop with
+Docker, run from inside this repo's own directory:
 
 ```bash
 ./fetch_reference_data.sh --kofam ~/kofam/
-cp ~/Downloads/K99001.hmm ~/kofam/
+cp assets/K99001.hmm ~/kofam/
 
 nextflow run main.nf \
     --genomes ~/genomes/strain1.fna \
@@ -281,9 +281,10 @@ nextflow run main.nf --genomes ... --hmms ... -profile laptop,docker -c local_mo
   `./fetch_reference_data.sh --kofam /path/to/kofam` downloads and unpacks them from
   [GenomeNet](https://www.genome.jp/ftp/db/kofam/). The same script fetches example genomes and a
   BUSCO lineage; `--help` lists what it does.
-- `K99001.hmm`, to detect the MHPP001 module specifically — see
-  [Testing the MHPP module specifically](#testing-the-mhpp-module-specifically) above. Not
-  bundled anywhere yet; you'll need a copy from wherever BLIMMP_MHPP work currently keeps it.
+- `K99001.hmm`, to detect the MHPP001 module specifically — bundled in this repo at
+  [`assets/K99001.hmm`](assets/K99001.hmm); see
+  [Testing the MHPP module specifically](#testing-the-mhpp-module-specifically) above for where
+  to copy it.
 
 ## If it does not work on your system
 
