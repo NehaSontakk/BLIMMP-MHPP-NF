@@ -5,6 +5,8 @@
 #   ./fetch_reference_data.sh --kofam /path/to/kofam
 #   ./fetch_reference_data.sh --genomes /path/to/genomes
 #   ./fetch_reference_data.sh --busco prochlorococcus_odb12 /path/to/busco_downloads
+#   ./fetch_reference_data.sh --extra-hmm /path/to/your.hmm /path/to/kofam
+#   ./fetch_reference_data.sh --restore-names /path/to/results /path/to/kofam
 #
 # Any combination, in one call or several. Each part checks for what it would
 # download and skips it, so re-running after an interruption resumes rather than
@@ -12,6 +14,14 @@
 #
 # KOfam comes from a pinned monthly snapshot. KOFAM_RELEASE=current takes the
 # newest instead; see the note above that variable for what that costs.
+#
+# --extra-hmm adds a custom profile (or a directory of them) to an already-fetched
+# KOfam directory, renamed into the same KNNNNN.hmm scheme the real profiles use --
+# a reserved block (K99002 and up; K99001 is this project's own MHPP addition) so
+# it can never collide with a real KEGG KO. --restore-names reverses that after a
+# run: it rewrites a results directory's output files, substituting each custom
+# profile's original name back in place of the KO id it was given, using the
+# mapping --extra-hmm recorded in the same KOfam directory.
 #
 # Nothing here is transferred from a person. All of it is public and versioned
 # upstream, which is what makes a port reproducible: the next cluster runs the
@@ -61,9 +71,18 @@ die () { echo "error: $*" >&2; exit 1; }
 say () { printf '%s\n' "$*"; }
 
 usage () {
-    sed -n '3,18p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '3,28p' "$0" | sed 's/^# \{0,1\}//'
     exit "${1:-0}"
 }
+
+# Custom KO ids added by --extra-hmm live in this reserved block. KEGG's own
+# numbering has not reached it (KOs currently run up to roughly K2xxxx-K3xxxx),
+# and K99001 is already spoken for by this project's own MHPP addition
+# (assets/K99001.hmm in the pipeline repo). The search for a free slot always
+# starts one past that, regardless of whether K99001.hmm actually happens to be
+# present in this particular copy of the KOfam directory yet, so the two can
+# never collide later.
+EXTRA_HMM_RESERVED_START=99002
 
 fetch_kofam () {
     local dir="$1"
@@ -174,6 +193,103 @@ fetch_busco () {
     busco --download "${lineage}" --download_path "${dir}" || die "busco --download failed"
     say "  pass it as --busco_lineage ${lineage} --busco_downloads ${dir}"
     say "  and see docs/overview.md first: on a closed genome, --sigma 1.0 is the better answer"
+}
+
+# Add a custom HMM profile (or a directory of them) to an already-fetched KOfam
+# directory. hmmsearch's domtblout reports a profile's own internal NAME line as
+# the query name, not its filename, so a custom profile has to be renamed on both
+# fronts -- file and internal NAME -- to look like a real KOfam entry to the rest
+# of the pipeline. Rewriting NAME to a synthetic Knnnnn id in the reserved 99xxx
+# block (see EXTRA_HMM_RESERVED_START above) does both: the pipeline runs exactly
+# as if it were a real KO, and --restore-names below undoes it afterward.
+fetch_extra_hmm () {
+    local src="$1" dir="$2"
+    [ -d "${dir}" ] || die "--extra-hmm: ${dir} does not exist yet -- fetch KOfam into it first with --kofam"
+
+    local files=()
+    if [ -d "${src}" ]; then
+        while IFS= read -r -d '' f; do files+=("${f}"); done \
+            < <(find "${src}" -maxdepth 1 -name '*.hmm' -print0)
+        [ "${#files[@]}" -gt 0 ] || die "--extra-hmm: no .hmm files found in ${src}"
+    elif [ -f "${src}" ]; then
+        files=("${src}")
+    else
+        die "--extra-hmm: ${src} is neither a file nor a directory"
+    fi
+
+    local mapping="${dir}/EXTRA_HMMS.tsv"
+    [ -f "${mapping}" ] || printf 'synthetic_id\toriginal_name\toriginal_source\tdate_added\n' > "${mapping}"
+
+    # Next free slot: one past the highest K99nnn.hmm already in the directory,
+    # or the reserved start if there are none yet (or only K99001 itself).
+    local next
+    next=$(find "${dir}" -maxdepth 1 -name 'K99[0-9][0-9][0-9].hmm' -exec basename {} .hmm \; \
+           | sed 's/^K//' | sort -n | tail -1)
+    if [ -z "${next}" ] || [ "${next}" -lt "${EXTRA_HMM_RESERVED_START}" ]; then
+        next="${EXTRA_HMM_RESERVED_START}"
+    else
+        next=$((next + 1))
+    fi
+
+    for f in "${files[@]}"; do
+        head -1 "${f}" | grep -q '^HMMER3/' \
+            || die "${f} does not look like an HMMER3 profile (no HMMER3/ header on line 1)"
+
+        local orig_name
+        orig_name=$(grep -m1 '^NAME' "${f}" | awk '{print $2}')
+        [ -n "${orig_name}" ] || orig_name=$(basename "${f}" .hmm)
+
+        local synthetic_id="K${next}"
+        local target="${dir}/${synthetic_id}.hmm"
+        [ -e "${target}" ] && die "internal error: ${target} already exists, refusing to overwrite"
+
+        sed -E "s/^(NAME[[:space:]]+).*/\1${synthetic_id}/" "${f}" > "${target}" \
+            || die "could not write ${target}"
+
+        printf '%s\t%s\t%s\t%s\n' "${synthetic_id}" "${orig_name}" \
+            "$(cd "$(dirname "${f}")" && pwd)/$(basename "${f}")" "$(date +%F)" >> "${mapping}"
+        say "extra-hmm: added '${orig_name}' as ${synthetic_id} -> ${target}"
+        next=$((next + 1))
+    done
+
+    say "extra-hmm: mapping recorded in ${mapping}"
+    say "  after a run, recover the original name(s) in your results with:"
+    say "    ./fetch_reference_data.sh --restore-names /path/to/results ${dir}"
+}
+
+# Reverse --extra-hmm's renaming in a results directory: every synthetic Knnnnn
+# id that --extra-hmm recorded gets substituted back to the original name it was
+# given, across every CSV/TSV/JSON/tblout/domtblout file under the directory.
+# Each file is backed up once as <name>.orig before the first edit, so re-running
+# this (or running it against a results directory it already touched) is safe.
+restore_hmm_names () {
+    local results_dir="$1" dir="$2"
+    local mapping="${dir}/EXTRA_HMMS.tsv"
+    [ -f "${mapping}" ] || die "--restore-names: no ${mapping} -- nothing was ever added to ${dir} with --extra-hmm"
+    [ -d "${results_dir}" ] || die "--restore-names: ${results_dir} does not exist"
+
+    local targets
+    targets=$(find "${results_dir}" -type f \
+        \( -name '*.csv' -o -name '*.tsv' -o -name '*.json' -o -name '*.tblout' -o -name '*.domtblout' \))
+    [ -n "${targets}" ] || die "--restore-names: no result files (.csv/.tsv/.json/.tblout/.domtblout) found under ${results_dir}"
+
+    local nfiles
+    nfiles=$(printf '%s\n' "${targets}" | wc -l | tr -d ' ')
+
+    local n=0
+    while IFS=$'\t' read -r synthetic_id original_name _rest; do
+        [ "${synthetic_id}" = "synthetic_id" ] && continue   # header row
+        [ -n "${synthetic_id}" ] || continue
+        say "restore-names: ${synthetic_id} -> ${original_name}"
+        while IFS= read -r f; do
+            [ -f "${f}.orig" ] || cp "${f}" "${f}.orig"
+            sed -i.bak "s/${synthetic_id}/${original_name}/g" "${f}" && rm -f "${f}.bak"
+        done <<< "${targets}"
+        n=$((n + 1))
+    done < "${mapping}"
+
+    say "restore-names: ${n} custom KO id(s) replaced across ${nfiles} file(s) under ${results_dir}"
+    say "  original copies kept alongside each file as <name>.orig"
 }
 
 [ $# -eq 0 ] && usage 0

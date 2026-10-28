@@ -42,6 +42,13 @@
                     "description": "A single concatenated .hmm file such as KOfam profiles.hmm, or a directory of individual .hmm files.",
                     "help_text": "Required for every run except -entry blimmp_only, which starts from finished HMMER tables."
                 },
+                "extra_hmms": {
+                    "type": "string",
+                    "format": "path",
+                    "fa_icon": "fas fa-plus",
+                    "description": "A custom .hmm profile, or a directory of them, to add to the search alongside --hmms.",
+                    "help_text": "Never copies or modifies --hmms: the custom profile is renamed to a synthetic KNNNNN id in a reserved block that cannot collide with a real KO, searched alongside it, and the original name is automatically restored in this run's own result files afterward. Does nothing with -entry blimmp_only."
+                },
                 "id_from_filename": {
                     "type": "boolean",
                     "default": false,

@@ -229,6 +229,51 @@ process GROUP_HMMS {
 }
 
 /*
+ * Fold a custom HMM profile (or a directory of them) into the search, without
+ * copying or modifying --hmms itself.
+ *
+ * hmmsearch's domtblout reports a profile's own internal NAME line as the query
+ * name, not its filename, so a custom profile has to be renamed on that line --
+ * not just given a KNNNNN.hmm filename -- to be treated identically to a real
+ * KOfam entry downstream (BLIMMP, CHECK_BLIMMP, MODULE_MATRIX all key off that
+ * name). Renamed ids come from a reserved block, K99002 and up -- K99001 is
+ * BLIMMP_MHPP's own addition (assets/K99001.hmm in that project) -- which real
+ * KEGG numbering has not reached, so a custom profile can never collide with a
+ * real one. See bin/stage_extra_hmms.py for the renaming itself.
+ *
+ * extra_hmms is staged normally: it is expected to be small (one profile, or a
+ * handful), unlike --hmms, which GROUP_HMMS deliberately receives as a raw path
+ * string to avoid staging a KOfam-sized directory. base_hmms stays a raw string
+ * for the same reason -- it is only scanned for ids already in use, never
+ * copied -- so this needs the same bind-mount note as GROUP_HMMS on plain
+ * Docker Desktop (see README's "Plain Docker needs an extra bind mount").
+ */
+process STAGE_EXTRA_HMMS {
+    label 'process_low'
+    container 'python:3.11'
+    publishDir "${params.outdir}", mode: 'copy', pattern: 'extra_hmms_mapping.tsv'
+
+    input:
+    path extra_hmms
+    val base_hmms
+
+    output:
+    path 'extra_hmms_chunk.hmm',    emit: hmm
+    path 'extra_hmms_mapping.tsv',  emit: mapping
+
+    script:
+    """
+    stage_extra_hmms.py --base-hmms '${base_hmms}' '${extra_hmms}'
+    """
+
+    stub:
+    """
+    touch extra_hmms_chunk.hmm
+    printf 'synthetic_id\\toriginal_name\\toriginal_source\\n' > extra_hmms_mapping.tsv
+    """
+}
+
+/*
  * Search a chunk of HMM profiles against a set of protein sequences.
  * Produces per-sequence (tblout) and per-domain (domtblout) hit tables.
  */
@@ -1451,6 +1496,15 @@ workflow {
         hmm_chunks = SPLIT_HMMS.out.flatten()
     }
 
+    // A custom profile (or directory of them) folds in as one more chunk,
+    // renamed to fit the KNNNNN scheme the rest of the pipeline expects -- see
+    // STAGE_EXTRA_HMMS above. --hmms is only scanned for ids already in use,
+    // never copied or modified.
+    if (params.extra_hmms) {
+        STAGE_EXTRA_HMMS(Channel.fromPath(params.extra_hmms, checkIfExists: true), params.hmms)
+        hmm_chunks = hmm_chunks.mix(STAGE_EXTRA_HMMS.out.hmm)
+    }
+
     // ---- Parallel hmmsearch: every protein file x every HMM chunk ----
     HMMSEARCH(proteins_ch.combine(hmm_chunks))
 
@@ -1517,6 +1571,55 @@ workflow {
     else {
         log.warn "BLIMMP will not run: no completeness estimate. Add --busco_lineage to measure it, or --sigma to state it. Continuing with HMMER annotation only."
     }
+
+    // Puts --extra_hmms' original name(s) back in place of the synthetic KNNNNN
+    // id STAGE_EXTRA_HMMS gave them, across every result file this run
+    // publishes -- fully automatic, so there is nothing to remember to run
+    // afterward.
+    //
+    // Runs from onComplete rather than as its own process because it has to see
+    // files after publishDir has already written them (RUN_BLIMMP and
+    // MERGE_RESULTS each publish independently, and re-wiring both into one more
+    // staged process just to undo a rename immediately after would cost more
+    // than this plain file-by-file substitution against the real output on disk).
+    //
+    // params is captured into plain locals before the closure, not read from
+    // inside it: onComplete fires asynchronously after the enclosing workflow
+    // closure has already returned, and params resolves to null by then if
+    // read live rather than captured.
+    def extra_hmms_requested = params.extra_hmms
+    def outdir_path = params.outdir
+    workflow.onComplete {
+        if (!extra_hmms_requested) return
+
+        def mapping = file("${outdir_path}/extra_hmms_mapping.tsv")
+        if (!mapping.exists()) return   // run failed before STAGE_EXTRA_HMMS published it
+
+        def pairs = mapping.readLines().drop(1)
+            .collect { it.split('\t') }
+            .findAll { it.size() >= 2 && it[0] }
+            .collect { [it[0], it[1]] }
+        if (!pairs) return
+
+        def restorable_exts = ['.csv', '.tsv', '.json', '.tblout', '.domtblout', '.out', '.log']
+        def targets = []
+        new File(outdir_path as String).eachFileRecurse { f ->
+            if (f.isFile() && f.name != 'extra_hmms_mapping.tsv' && restorable_exts.any { f.name.endsWith(it) })
+                targets << f
+        }
+
+        def changed = 0
+        targets.each { f ->
+            def text = f.text
+            def replaced = text
+            pairs.each { synthetic_id, original_name -> replaced = replaced.replace(synthetic_id, original_name) }
+            if (replaced != text) {
+                f.text = replaced
+                changed = changed + 1
+            }
+        }
+        log.info "extra_hmms: restored ${pairs.size()} custom name(s) across ${changed} of ${targets.size()} result file(s) in ${outdir_path}"
+    }
 }
 
 /*
@@ -1543,7 +1646,7 @@ workflow blimmp_only {
 
     // Nothing else in the pipeline runs here, so flags belonging to the search
     // are refused rather than accepted and ignored.
-    ['genomes', 'proteins', 'hmms', 'busco_lineage', 'input'].each { name ->
+    ['genomes', 'proteins', 'hmms', 'extra_hmms', 'busco_lineage', 'input'].each { name ->
         if (params[name])
             error """--${name} does nothing with -entry blimmp_only.
              |  This entry point starts from finished HMMER tables. Drop the flag, or
