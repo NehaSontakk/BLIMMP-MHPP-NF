@@ -255,6 +255,48 @@ nothing else about it changes:
 nextflow run main.nf --genomes ... --hmms ... -profile laptop,docker -c local_mount.config
 ```
 
+### Adding your own custom HMM profile
+
+Two ways to search a custom profile — your own, not from KOfam — alongside the regular KOfam
+profiles, for two different needs.
+
+**`--extra_hmms <file-or-dir>`, for one run.** The lightweight option: point it at a single
+`.hmm` file or a directory of them, alongside your usual `--hmms`:
+
+```bash
+nextflow run main.nf \
+    --genomes <path to your genome files> \
+    --hmms <path to your KOfam profiles> \
+    --extra_hmms <path to your custom .hmm file or directory> \
+    --busco_lineage bacteria_odb12 \
+    -profile <profile from the table above>
+```
+
+This never copies or modifies your `--hmms` directory — only scans it to pick a synthetic
+`K99002`-and-up id for your profile that can't collide with a real KO (`K99001` is reserved for
+this project's own MHPP addition). The profile is searched under that id, and once the run
+finishes, its *original* name is automatically put back in every result file (`.csv`, `.tsv`,
+`.json`, `.tblout`, `.domtblout`, `.out`, `.log`) — nothing to run afterward, nothing to remember.
+Does nothing with `-entry blimmp_only`, which starts from finished HMMER tables and never
+searches anything.
+
+**`fetch_reference_data.sh --extra-hmm`, to add it permanently to a shared KOfam directory**
+instead — e.g. for a whole lab or cluster to reuse, the same way `assets/K99001.hmm` is added in
+[Testing the MHPP module specifically](#testing-the-mhpp-module-specifically) above:
+
+```bash
+./fetch_reference_data.sh --extra-hmm <path to your custom .hmm file or directory> <your --hmms path>
+```
+
+This writes straight into that KOfam directory (same renaming scheme, same reserved id block),
+so every future run that points `--hmms` there automatically includes it — no `--extra_hmms` flag
+needed on those runs at all. Afterward, recover the original name(s) in a finished run's results
+with:
+
+```bash
+./fetch_reference_data.sh --restore-names <path to results> <your --hmms path>
+```
+
 ## Documentation
 
 - [What the pipeline does](docs/overview.md): the steps, completeness, taxonomic priors, and re-scoring without re-searching
